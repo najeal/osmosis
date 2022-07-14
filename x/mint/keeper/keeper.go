@@ -25,6 +25,23 @@ type Keeper struct {
 	feeCollectorName string
 }
 
+<<<<<<< HEAD
+=======
+type invalidRatioError struct {
+	ActualRatio sdk.Dec
+}
+
+func (e invalidRatioError) Error() string {
+	return fmt.Sprintf("mint allocation ratio (%s) is greater than 1", e.ActualRatio)
+}
+
+var (
+	errAmountCannotBeNilOrZero               = errors.New("amount cannot be nil or zero")
+	errDevVestingModuleAccountAlreadyCreated = fmt.Errorf("%s module account already exists", types.DeveloperVestingModuleAcctName)
+	errDevVestingModuleAccountNotCreated     = fmt.Errorf("%s module account does not exist", types.DeveloperVestingModuleAcctName)
+)
+
+>>>>>>> 12b961e0 (refactor(x/mint): introduce distributeDeveloperRewards methods; unit tests (1/2) (#2065))
 // NewKeeper creates a new mint Keeper instance.
 func NewKeeper(
 	cdc codec.BinaryCodec, key sdk.StoreKey, paramSpace paramtypes.Subspace,
@@ -165,20 +182,31 @@ func (k Keeper) DistributeMintedCoin(ctx sdk.Context, mintedCoin sdk.Coin) error
 	params := k.GetParams(ctx)
 	proportions := params.DistributionProportions
 
+<<<<<<< HEAD
 	// allocate staking incentives into fee collector account to be moved to on next begin blocker by staking module
 	stakingIncentivesCoins := sdk.NewCoins(k.GetProportions(ctx, mintedCoin, proportions.Staking))
 	err := k.bankKeeper.SendCoinsFromModuleToModule(ctx, types.ModuleName, k.feeCollectorName, stakingIncentivesCoins)
+=======
+	// allocate staking incentives into fee collector account to be moved to on next begin blocker by staking module account.
+	stakingIncentivesAmount, err := k.distributeToModule(ctx, k.feeCollectorName, mintedCoin, proportions.Staking)
+>>>>>>> 12b961e0 (refactor(x/mint): introduce distributeDeveloperRewards methods; unit tests (1/2) (#2065))
 	if err != nil {
 		return err
 	}
 
+<<<<<<< HEAD
 	// allocate pool allocation ratio to pool-incentives module account account
 	poolIncentivesCoins := sdk.NewCoins(k.GetProportions(ctx, mintedCoin, proportions.PoolIncentives))
 	err = k.bankKeeper.SendCoinsFromModuleToModule(ctx, types.ModuleName, poolincentivestypes.ModuleName, poolIncentivesCoins)
+=======
+	// allocate pool allocation ratio to pool-incentives module account.
+	poolIncentivesAmount, err := k.distributeToModule(ctx, poolincentivestypes.ModuleName, mintedCoin, proportions.PoolIncentives)
+>>>>>>> 12b961e0 (refactor(x/mint): introduce distributeDeveloperRewards methods; unit tests (1/2) (#2065))
 	if err != nil {
 		return err
 	}
 
+<<<<<<< HEAD
 	devRewardCoin := k.GetProportions(ctx, mintedCoin, proportions.DeveloperRewards)
 	devRewardCoins := sdk.NewCoins(devRewardCoin)
 	// This is supposed to come from the developer vesting module address, not the mint module address
@@ -186,15 +214,74 @@ func (k Keeper) DistributeMintedCoin(ctx sdk.Context, mintedCoin sdk.Coin) error
 	err = k.bankKeeper.BurnCoins(ctx, types.ModuleName, devRewardCoins)
 	if err != nil {
 		return err
+=======
+	// allocate dev rewards to respective accounts from developer vesting module account.
+	devRewardAmount, err := k.distributeDeveloperRewards(ctx, mintedCoin, proportions.DeveloperRewards, params.WeightedDeveloperRewardsReceivers)
+	if err != nil {
+		return err
+	}
+
+	// subtract from original provision to ensure no coins left over after the allocations
+	communityPoolAmount := mintedCoin.Amount.Sub(stakingIncentivesAmount).Sub(poolIncentivesAmount).Sub(devRewardAmount)
+	err = k.distrKeeper.FundCommunityPool(ctx, sdk.NewCoins(sdk.NewCoin(params.MintDenom, communityPoolAmount)), k.accountKeeper.GetModuleAddress(types.ModuleName))
+	if err != nil {
+		return err
+	}
+
+	// call an hook after the minting and distribution of new coins
+	k.hooks.AfterDistributeMintedCoin(ctx, mintedCoin)
+
+	return err
+}
+
+// distributeToModule distributes mintedCoin multiplied by proportion to the recepientModule account.
+func (k Keeper) distributeToModule(ctx sdk.Context, recipientModule string, mintedCoin sdk.Coin, proportion sdk.Dec) (sdk.Int, error) {
+	distributionCoin, err := getProportions(ctx, mintedCoin, proportion)
+	if err != nil {
+		return sdk.Int{}, err
+	}
+	if err := k.bankKeeper.SendCoinsFromModuleToModule(ctx, types.ModuleName, recipientModule, sdk.NewCoins(distributionCoin)); err != nil {
+		return sdk.Int{}, err
+	}
+	return distributionCoin.Amount, nil
+}
+
+// distributeDeveloperRewards distributes developer rewards from developer vesting module account
+// to the respective account receivers by weight (developerRewardsReceivers).
+// If no developer reward receivers given, funds the community pool instead.
+// Returns the total amount distributed from the developer vesting module account.
+// Updates supply offsets to reflect the amount of coins distributed. This is done so because the developer rewards distributions are
+// allocated from its own module account, not the mint module accont (TODO: next step in https://github.com/osmosis-labs/osmosis/issues/1916).
+// Returns nil on success, error otherwise.
+// With respect to input parameters, errors occur when:
+// - developerRewardsProportion is greater than 1.
+// - invalid address in developer rewards receivers.
+// - the balance of developer module account is less than totalMintedCoin * developerRewardsProportion.
+// - the balance of mint module is less than totalMintedCoin * developerRewardsProportion.
+// CONTRACT:
+// - weights in developerRewardsReceivers add up to 1.
+// - addresses in developerRewardsReceivers are valid.
+func (k Keeper) distributeDeveloperRewards(ctx sdk.Context, totalMintedCoin sdk.Coin, developerRewardsProportion sdk.Dec, developerRewardsReceivers []types.WeightedAddress) (sdk.Int, error) {
+	devRewardCoin, err := getProportions(ctx, totalMintedCoin, developerRewardsProportion)
+	if err != nil {
+		return sdk.Int{}, err
+	}
+	devRewardCoins := sdk.NewCoins(devRewardCoin)
+	// This is supposed to come from the developer vesting module address, not the mint module address
+	// we over-allocated to the mint module address earlier though, so we burn it right here.
+	if err := k.bankKeeper.BurnCoins(ctx, types.ModuleName, devRewardCoins); err != nil {
+		return sdk.Int{}, err
+>>>>>>> 12b961e0 (refactor(x/mint): introduce distributeDeveloperRewards methods; unit tests (1/2) (#2065))
 	}
 
 	// Take the current balance of the developer rewards pool and remove it from the supply offset
 	// We re-introduce the new supply at the end, in order to avoid any rounding discrepancies.
-	developerAccountBalance := k.bankKeeper.GetBalance(ctx, k.accountKeeper.GetModuleAddress(types.DeveloperVestingModuleAcctName), mintedCoin.Denom)
-	k.bankKeeper.AddSupplyOffset(ctx, mintedCoin.Denom, developerAccountBalance.Amount)
+	developerAccountBalance := k.bankKeeper.GetBalance(ctx, k.accountKeeper.GetModuleAddress(types.DeveloperVestingModuleAcctName), totalMintedCoin.Denom)
+	k.bankKeeper.AddSupplyOffset(ctx, totalMintedCoin.Denom, developerAccountBalance.Amount)
 
-	if len(params.WeightedDeveloperRewardsReceivers) == 0 {
+	if len(developerRewardsReceivers) == 0 {
 		// fund community pool when rewards address is empty
+<<<<<<< HEAD
 		err = k.distrKeeper.FundCommunityPool(ctx, devRewardCoins, k.accountKeeper.GetModuleAddress(types.DeveloperVestingModuleAcctName))
 		if err != nil {
 			return err
@@ -203,28 +290,42 @@ func (k Keeper) DistributeMintedCoin(ctx sdk.Context, mintedCoin sdk.Coin) error
 		// allocate developer rewards to addresses by weight
 		for _, w := range params.WeightedDeveloperRewardsReceivers {
 			devRewardPortionCoins := sdk.NewCoins(k.GetProportions(ctx, devRewardCoin, w.Weight))
+=======
+		if err := k.distrKeeper.FundCommunityPool(ctx, devRewardCoins, k.accountKeeper.GetModuleAddress(types.DeveloperVestingModuleAcctName)); err != nil {
+			return sdk.Int{}, err
+		}
+	} else {
+		// allocate developer rewards to addresses by weight
+		for _, w := range developerRewardsReceivers {
+			devPortionCoin, err := getProportions(ctx, devRewardCoin, w.Weight)
+			if err != nil {
+				return sdk.Int{}, err
+			}
+			devRewardPortionCoins := sdk.NewCoins(devPortionCoin)
+>>>>>>> 12b961e0 (refactor(x/mint): introduce distributeDeveloperRewards methods; unit tests (1/2) (#2065))
 			if w.Address == "" {
 				err = k.distrKeeper.FundCommunityPool(ctx, devRewardPortionCoins,
 					k.accountKeeper.GetModuleAddress(types.DeveloperVestingModuleAcctName))
 				if err != nil {
-					return err
+					return sdk.Int{}, err
 				}
 			} else {
 				devRewardsAddr, err := sdk.AccAddressFromBech32(w.Address)
 				if err != nil {
-					return err
+					return sdk.Int{}, err
 				}
 				// If recipient is vesting account, pay to account according to its vesting condition
 				err = k.bankKeeper.SendCoinsFromModuleToAccount(
 					ctx, types.DeveloperVestingModuleAcctName, devRewardsAddr, devRewardPortionCoins)
 				if err != nil {
-					return err
+					return sdk.Int{}, err
 				}
 			}
 		}
 	}
 
 	// Take the new balance of the developer rewards pool and add it back to the supply offset deduction
+<<<<<<< HEAD
 	developerAccountBalance = k.bankKeeper.GetBalance(ctx, k.accountKeeper.GetModuleAddress(types.DeveloperVestingModuleAcctName), mintedCoin.Denom)
 	k.bankKeeper.AddSupplyOffset(ctx, mintedCoin.Denom, developerAccountBalance.Amount.Neg())
 
@@ -239,4 +340,21 @@ func (k Keeper) DistributeMintedCoin(ctx sdk.Context, mintedCoin sdk.Coin) error
 	k.hooks.AfterDistributeMintedCoin(ctx, mintedCoin)
 
 	return err
+=======
+	developerAccountBalance = k.bankKeeper.GetBalance(ctx, k.accountKeeper.GetModuleAddress(types.DeveloperVestingModuleAcctName), totalMintedCoin.Denom)
+	k.bankKeeper.AddSupplyOffset(ctx, totalMintedCoin.Denom, developerAccountBalance.Amount.Neg())
+
+	return devRewardCoin.Amount, nil
+}
+
+// getProportions gets the balance of the `MintedDenom` from minted coins and returns coins according to the
+// allocation ratio. Returns error if ratio is greater than 1.
+// TODO: this currently rounds down and is the cause of rounding discrepancies.
+// To be fixed in: https://github.com/osmosis-labs/osmosis/issues/1917
+func getProportions(ctx sdk.Context, mintedCoin sdk.Coin, ratio sdk.Dec) (sdk.Coin, error) {
+	if ratio.GT(sdk.OneDec()) {
+		return sdk.Coin{}, invalidRatioError{ratio}
+	}
+	return sdk.NewCoin(mintedCoin.Denom, mintedCoin.Amount.ToDec().Mul(ratio).TruncateInt()), nil
+>>>>>>> 12b961e0 (refactor(x/mint): introduce distributeDeveloperRewards methods; unit tests (1/2) (#2065))
 }
