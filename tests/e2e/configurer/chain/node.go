@@ -26,16 +26,6 @@ type NodeConfig struct {
 	containerManager *containers.Manager
 }
 
-// NewNodeConfig returens new initialized NodeConfig.
-func NewNodeConfig(t *testing.T, initNode *initialization.Node, chainId string, containerManager *containers.Manager) *NodeConfig {
-	return &NodeConfig{
-		Node:             *initNode,
-		chainId:          chainId,
-		containerManager: containerManager,
-		t:                t,
-	}
-}
-
 // Run runs a node container for the given nodeIndex.
 // The node configuration must be already added to the chain config prior to calling this
 // method.
