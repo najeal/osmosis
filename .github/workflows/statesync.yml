@@ -1,23 +1,77 @@
-# This is a basic workflow that is manually triggered
+# This workflows runs on every new commit made in the latest development branch. 
+# It checks that a new commit didn't break state compatibility by:
+# - building the new `osmosisd` binary including the latest changes
+# - replaying a configurable number of previous blocks
+# 
+# The node starts from a snapshots that's taken right before epoch and waits 
+# `DELTA_HALT_HEIGHT` blocks after epoch before halting.
 
-name: State Sync
+name: state_sync
 
-# Controls when the action will run. Workflow runs when manually triggered using the UI
-# or API.
-on: [workflow_dispatch]
+on:
+  push:
+    branches:    
+      # - 'v10.x'
+      - 'v10.x-test-ci'
 
-# This workflow tests state sync against the Notional archive server.
-# To decentralize this workflow, add additional nodes to scripts/statesync.sh
-
+env:
+  SNAPSHOT_URL: https://osmosis-snapshot.sfo3.cdn.digitaloceanspaces.com/osmosis.json
+  RPC_ENDPOINT: https://rpc.osmosis.zone
+  LCD_ENDPOINT: https://lcd.osmosis.zone
+  DELTA_HALT_HEIGHT: 20
+ 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    name: osmosis state sync
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v2.1.3
-        with:
-          go-version: '^1.17'
 
-      - name: state sync
-        run: bash scripts/statesync.sh
+  create_artifacts:
+    runs-on: osmo-runner
+    steps:
+      - 
+        name: Check out the repo
+        uses: actions/checkout@v3
+      - 
+        name: Build the binary with osmobuilder
+        run: |
+          make -f contrib/images/osmobuilder/Makefile get-binary-amd64
+      - 
+        name: Copy osmosisd binary to PATH and check version
+        run: |
+          sudo chmod +x /usr/local/bin/osmosisd
+          sudo cp osmosisd /usr/local/bin/osmosisd
+          osmosisd version
+        working-directory: release
+      - 
+        name: Download pre-epoch snapshot
+        run:  |
+          rm -rf $HOME/.osmosisd/data
+          SNAPSHOT_URL=$(curl -s ${{ env.SNAPSHOT_URL }}  | dasel --plain -r json  '(file=osmosis-1-pre-epoch).url')
+          wget -q -O - $SNAPSHOT_URL | lz4 -d | tar -C $HOME/.osmosisd/ -xvf - 
+      - 
+        name: Configure Osmosis Node
+        run:  |
+          CONFIG_FOLDER=$HOME/.osmosisd/config
+
+          # Get height of most recent epoch
+          LAST_EPOCH_BLOCK_HEIGHT=$(curl -s ${{ env.LCD_ENDPOINT }}/osmosis/epochs/v1beta1/epochs | dasel --plain -r json 'epochs.(identifier=day).current_epoch_start_height')
+          DELTA_HALT_HEIGHT=${{ env.DELTA_HALT_HEIGHT }}
+          HALT_HEIGHT=$(($LAST_EPOCH_BLOCK_HEIGHT + $DELTA_HALT_HEIGHT))
+
+          echo "Last Epoch Height: $LAST_EPOCH_BLOCK_HEIGHT"
+          echo "Halt Height: $HALT_HEIGHT"
+
+          # Edit config.toml
+          dasel put string -f $CONFIG_FOLDER/config.toml '.tx_index.indexer' null
+
+          # Edit app.toml
+          dasel put string -f $CONFIG_FOLDER/app.toml '.halt-height' $HALT_HEIGHT
+          dasel put string -f $CONFIG_FOLDER/app.toml '.pruning' everything
+          dasel put string -f $CONFIG_FOLDER/app.toml '.state-sync.snapshot-interval' 0
+      - 
+        name: Start Osmosis Node
+        run: osmosisd start 2>&1 | tee /tmp/osmosisd_start.log
+      -
+        name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          name: osmosisd_start.log
+          path: /tmp/osmosisd_start.log
