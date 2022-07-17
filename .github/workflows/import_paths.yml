@@ -64,6 +64,7 @@ jobs:
           commit-message: "auto: update Go import paths to v${{ inputs.version }}"
           body: "**Automated pull request**\n\nUpdating Go import paths to v${{ inputs.version }}"
           branch: ${{ inputs.target-branch }}
+          branch-suffix: timestamp
           base: ${{ inputs.source-branch }}
           delete-branch: true
           assignees: ${{ github.actor }}
