@@ -64,7 +64,7 @@ jobs:
           body: "**Automated pull request**\n\nUpdating Go import paths to v${{ inputs.version }}"
           branch: ${{ inputs.target-branch }}
           base: ${{ inputs.source-branch }}
-          delete-branch: ${{ inputs.source-branch }}
+          delete-branch: true
           assignees: ${{ github.actor }}
           draft: true
           labels: T:auto,T:code-hygiene
