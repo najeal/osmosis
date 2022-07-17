@@ -20,7 +20,7 @@ type AppModuleSimulationV2 interface {
 	module.AppModule
 
 	Actions() []Action
-	// PropertyTests()
+	// PropertyChecks() []PropertyCheck
 }
 
 type AppModuleSimulationV2WithRandGenesis interface {
