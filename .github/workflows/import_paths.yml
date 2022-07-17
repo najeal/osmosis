@@ -60,7 +60,7 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v4
         with:
-          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+          token: ${{ secrets.ADD_TO_PROJECT_PAT }}
           commit-message: "auto: update Go import paths to v${{ inputs.version }}"
           body: "**Automated pull request**\n\nUpdating Go import paths to v${{ inputs.version }}"
           branch: ${{ inputs.target-branch }}
