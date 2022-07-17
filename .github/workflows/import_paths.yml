@@ -63,9 +63,9 @@ jobs:
           token: ${{ secrets.ADD_TO_PROJECT_PAT }}
           commit-message: "auto: update Go import paths to v${{ inputs.version }}"
           body: "**Automated pull request**\n\nUpdating Go import paths to v${{ inputs.version }}"
-          branch: ${{ inputs.target-branch }}
+          base: ${{ inputs.target-branch }}
           branch-suffix: random
-          base: ${{ inputs.source-branch }}
+          branch: ${{ inputs.source-branch }}
           delete-branch: true
           assignees: ${{ github.actor }}
           draft: true
